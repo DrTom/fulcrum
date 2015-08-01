@@ -1,6 +1,6 @@
 source 'http://rubygems.org'
 
-ruby '2.2.1'
+# ruby '2.2.1'
 
 gem 'rails', '~> 4.1.9'
 gem 'sass-rails', '~> 4.0.3'
@@ -18,6 +18,8 @@ gem 'jquery-ui-rails'
 gem 'pg', group: :postgres
 gem 'mysql2', group: :mysql
 gem 'sqlite3', group: :sqlite
+
+gem 'cider_ci-support', group: [:development, :test]
 
 group :production do
   gem 'rails_12factor'

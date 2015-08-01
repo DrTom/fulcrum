@@ -1,0 +1,227 @@
+jobs:
+
+###############################################################################
+### Dynamic Tests ##############################################################
+###############################################################################
+
+  tests:
+
+    name: Tests
+
+    description: |
+      Run all rails tests via either minitest, RSpec, or cucumber.
+
+    run-on:
+    - type: branch
+      include-match: ^.*$
+
+    context:
+
+      task-defaults:
+        eager-trials: 1
+        max-auto-trials: 3
+
+        environment-variables:
+          RAILS_ENV: test
+          LANG: "en_US.UTF-8"
+
+        git-options:
+          submodules:
+            clone: True
+            timeout: 300
+
+        trial-attachments:
+          logs:
+            glob: 'log/*.log'
+            content-type: text/plain
+
+        traits:
+          firefox-esr: true
+          linux: true
+          mysql: true
+          nodejs: true
+          phantomjs: true
+          postgresql: true
+          postgresql: true
+          rbenv: true
+          ruby-2.2: true
+          ruby: true
+          sqlite3: true
+          tightvnc: true
+
+        ports:
+          XVNC_PORT:
+            inet_address: "localhost"
+            min: 5900
+            max: 5999
+
+        scripts:
+
+          configure-database:
+            body: |
+              #!/usr/bin/env ruby
+              require 'yaml'
+
+              rails_env = ENV['RAILS_ENV'] || 'test'
+
+              config =
+                if File.exist? 'config/database_cider-ci.yml'
+                  YAML.load_file('config/database_cider-ci.yml')[rails_env]
+                elsif File.exist? 'config/database.yml'
+                  YAML.load_file('config/database.yml')[rails_env]
+                else
+                  YAML.load "
+                    adapter: sqlite3
+                    pool: 5
+                    timeout: 5000 "
+                end
+
+              config.merge!(
+                case config['adapter']
+                when 'sqlite3'
+                  { 'database' => "db/#{rails_env}.sqlite3" }
+                when 'postgresql'
+                  { 'database' => "#{rails_env}_#{ENV['CIDER_CI_TRIAL_ID']}",
+                    'username' => ENV['PGUSER'],
+                    'password' => ENV['PGPASSWORD'] }
+                when 'mysql2'
+                  { 'database' => "#{rails_env}_#{ENV['CIDER_CI_TRIAL_ID']}",
+                    'username' => ENV['MYSQL_USER'],
+                    'password' => Env['MYSQL_PASSWORD'] }
+                else
+                  fail 'Adapter not supported'
+                end)
+
+              File.open('config/database.yml', 'w') do |file|
+                file.write({ rails_env => config }.to_yaml)
+              end
+
+          bundle:
+            exclusive-executor-resource: bundler
+            body: bundle
+
+          create-database:
+            body: bundle exec rake db:reset
+            start-when:
+            - script: bundle
+            - script: configure-database
+
+          start-vnc:
+            body: tightvncserver ":$XVNC_PORT"  -geometry 1024x768 -rfbport "$XVNC_PORT"  -interface '127.0.0.1'
+
+          test:
+            start-when:
+            - script: start-vnc
+            - script: create-database
+            - script: bundle
+
+          delete-database:
+            body:  bundle exec rake db:drop
+            ignore-state: true
+            start-when:
+            - script: test
+              states: [aborted, passed, failed, skipped]
+
+          stop-vnc:
+            body: tightvncserver -kill ":$XVNC_PORT" -clean
+            ignore-state: true
+            start-when:
+            - script: test
+              states: [aborted, passed, failed, skipped]
+
+      subcontexts:
+
+      - name: minitest
+        task_defaults:
+          scripts:
+            test:
+              body: |
+                export DISPLAY=":$XVNC_PORT" \
+                && bundle exec ruby -Ilib:test $CIDER_CI_TASK_FILE
+
+        _cider-ci_generate-tasks:
+          include-match: test/.*_test.rb
+
+
+      - name: RSpec
+        task_defaults:
+          scripts:
+            test:
+              body: |
+                export DISPLAY=":$XVNC_PORT" \
+                && bundle exec rspec $CIDER_CI_TASK_FILE
+
+        _cider-ci_generate-tasks:
+          include-match: spec/.*_spec.rb
+
+
+      - name: cucumber
+        task_defaults:
+          scripts:
+            test:
+              body: |
+                export DISPLAY=":$XVNC_PORT" \
+                && bundle exec cucumber $CIDER_CI_TASK_FILE
+
+        _cider-ci_generate-tasks:
+          include-match: features/.*feature
+
+
+###############################################################################
+### Static Checks ##############################################################
+###############################################################################
+
+  code-checks:
+
+    name: Code Checks
+
+    description: |
+      Run static checks and metrics: complexity, duplicaiont, code format.
+
+    run-on:
+    - type: branch
+      include-match: ^.*$
+
+    context:
+
+      task-defaults:
+
+        eager-trials: 1
+        max-auto-trials: 2
+        traits:
+          linux: true
+          rbenv: true
+          ruby: true
+
+        environment_variables:
+          RAILS_ENV: test
+          LANG: "en_US.UTF-8"
+
+        scripts:
+          bundle:
+            exclusive-executor-resource: bundler
+            body: bundle
+          test:
+            start-when:
+            - script: bundle
+
+      tasks:
+
+        code_complexity:
+          name: Code complexity with flog
+          scripts:
+            test:
+              body: bundle exec cider-ci_flay app/ config/ lib/
+
+        code_similarity:
+          name: Code similarity with flay
+          scripts:
+            test:
+              body: bundle exec cider-ci_flay app/ config/ lib/
+
+        lint_ruby:
+          name: Lint/Stylecheck with Rubocop
+          scripts:
+            test:
+              body: bundle exec rubocop
+
