@@ -20,6 +20,7 @@ gem 'mysql2', group: :mysql
 gem 'sqlite3', group: :sqlite
 
 gem 'cider_ci-support', group: [:development, :test]
+gem 'rubocop', require: false, group: [:development, :test]
 
 group :production do
   gem 'rails_12factor'
